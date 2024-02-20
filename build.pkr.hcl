@@ -28,17 +28,7 @@ build {
     inline = [
       "echo 'Setting up hostname...'",
       "echo ${var.hostname} > /etc/hostname",
-      "sed -i -r -e 's/(.*)raspberrypi(.*?)$/\1${var.hostname}\2/g' /etc/hosts"
-    ]
-  }
-
-  provisioner "shell" {
-    inline = [
-      "echo 'Setting up network...'",
-      "echo interface eth0 >> /etc/dhcpcd.conf",
-      "echo static ip_address=${var.eth0_ipv4} >> /etc/dhcpcd.conf",
-      "echo static routers=${var.eth0_gateway} >> /etc/dhcpcd.conf",
-      "echo static domain_name_servers=${var.eth0_dns} >> /etc/dhcpcd.conf"
+      "sed -i -r -e 's/(.*)raspberrypi(.*?)$/\\1${var.hostname}\\2/g' /etc/hosts"
     ]
   }
 

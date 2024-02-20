@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Step 3: Configure the iSCSI mount and some boot parameters. Run this on your build host. Once you are
+# done, power down the Pi and remove the SD card, then power it back on.
+#
 # Note: This is less a shell script and more a collection of snippets to use. Set environment variables
 # accordingly.
 
@@ -47,8 +50,8 @@ sudo partx --delete -v ${LOOP_DEVICE}
 
 NFS_IP=$(cat ${ISCSI_ROOT_DIR}/etc/iscsi/iscsi.initramfs | grep 'ISCSI_TARGET_IP=' | cut -d '=' -f 2)
 NFS_ROOT_PATH="${TFTP_ROOT}${PI_MAC}"
-sudo sed -i -r -E \
-  "s@.*/boot/firmware +.*@${NFS_IP}:${NFS_ROOT_PATH} /boot/firmware nfs defaults,vers=4.1,proto=tcp 0 0@" \
+sudo sed -r -E \
+  "s@.*/boot(/firmware)? +.*@${NFS_IP}:${NFS_ROOT_PATH} /boot/firmware nfs defaults,vers=4.1,proto=tcp 0 0@" \
   ${ISCSI_ROOT_DIR}/etc/fstab
 
 # Update /

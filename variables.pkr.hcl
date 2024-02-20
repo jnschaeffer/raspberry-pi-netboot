@@ -2,18 +2,6 @@ variable "hostname" {
   type = string
 }
 
-variable "eth0_ipv4" {
-  type = string
-}
-
-variable "eth0_gateway" {
-  type = string
-}
-
-variable "eth0_dns" {
-  type = string
-}
-
 variable "iscsi_initiator_iqn" {
   type = string
 }
