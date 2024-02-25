@@ -18,12 +18,12 @@ sudo iscsiadm \
   --portal ${ISCSI_TARGET_IP} \
   --login
 
-# Find the iSCSI device, set ISCSI_DEVICE to the device path, and create a partition
+# Find the iSCSI device with lsblk, set ISCSI_DEVICE to the device path, and create a partition
 
 sudo parted ${ISCSI_DEVICE} mklabel gpt
 sudo parted --align optimal ${ISCSI_DEVICE} mkpart primary ext4 0% 100%
 
-# Set ISCSI_ROOT_PARTITION to the root partition and make a filesystem
+# Find the root partition with lsblk ISCSI_ROOT_PARTITION to the root partition and make a filesystem
 
 sudo mkfs.ext4 ${ISCSI_ROOT_PARTITION}
 ISCSI_ROOT_DIR="$(mktemp -d)"
@@ -36,21 +36,22 @@ LOOP_DEVICE=$(echo ${CREATION_OUTPUT} | sed -E 's@.*(/dev/loop[0-9]+).*@\1@')
 IMAGE_ROOT_DIR="$(mktemp -d)"
 sudo mount "${LOOP_DEVICE}p2" ${IMAGE_ROOT_DIR}
 
-# Copy the root dir contents to the iSCSI root
+# Copy the root dir contents to the iSCSI root. Use sync to make sure everything is written
 sudo rsync -a --info=progress2 "${IMAGE_ROOT_DIR}/" ${ISCSI_ROOT_DIR}
+sync
 
 # Unmount the loop device and clean up the dangling partitions
 sudo umount ${IMAGE_ROOT_DIR}
 sudo partx --delete -v ${LOOP_DEVICE}
 
 # Set PI_MAC to the MAC address of the server and TFTP_ROOT to the TFTP root, then update /etc/fstab
-# so that /boot points to the NFS directory and / points to the iSCSI target
+# so that /boot/firmware points to the NFS directory and / points to the iSCSI target
 
-# Update /boot
+# Update /boot/firmware
 
 NFS_IP=$(cat ${ISCSI_ROOT_DIR}/etc/iscsi/iscsi.initramfs | grep 'ISCSI_TARGET_IP=' | cut -d '=' -f 2)
 NFS_ROOT_PATH="${TFTP_ROOT}${PI_MAC}"
-sudo sed -r -E \
+sudo sed -i -r -E \
   "s@.*/boot(/firmware)? +.*@${NFS_IP}:${NFS_ROOT_PATH} /boot/firmware nfs defaults,vers=4.1,proto=tcp 0 0@" \
   ${ISCSI_ROOT_DIR}/etc/fstab
 

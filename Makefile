@@ -16,6 +16,7 @@ dirs:
 
 $(IMAGES): $(CONFIGS) *.pkr.hcl | dirs
 	@for config in $(CONFIGS); do \
+		echo "Building image for $$config..."; \
 		sudo PACKER_PLUGIN_PATH=$(PLUGINS_DIR) DONT_SETUP_QEMU=1 packer build -var=image_dir=$(IMAGES_DIR) -var-file="$$config" .; \
 	done
 

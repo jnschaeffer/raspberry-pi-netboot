@@ -2,7 +2,13 @@
 
 # Step 2: Configure the initramfs. Run this on your Pi after rebooting, with the SD card in.
 
+set +x
+
+PI_MAC="$(ip link show eth0 | egrep -o 'link/ether [0-9a-f:]+' | cut -f2 -d' ' | tr ':' '-')"
 TFTP_ROOT="/volume1/tftp/"
+
+# Move /boot/ssh and /boot/userconf.txt back to /boot/firmware since we'll need them again
+cp /boot/ssh /boot/userconf.txt /boot/firmware
 
 PI_HOSTNAME=$(hostname)
 ISCSI_INITIATOR_IQN=$(cat /etc/iscsi/iscsi.initramfs | grep 'ISCSI_INITIATOR=' | cut -d '=' -f 2)
