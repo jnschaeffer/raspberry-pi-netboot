@@ -25,7 +25,7 @@ This template and the associated scripts make some specific assumptions about th
 
 * Each machine is a Raspberry Pi 4
 * Individual machines get network information from a DHCP server instead of using static IPs
-* The TFTP server is running on the same subnet as the Raspberry Pi (this is a requirement of Raspberry Pi [network booting][net-boot], which uses ARP to find the server)
+* The TFTP server is running on the same subnet as the Raspberry Pi
 * The DHCP server advertises the location of the TFTP server using [DHCP option 66][rfc-2132]
 
 [net-boot]: https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#network-booting
