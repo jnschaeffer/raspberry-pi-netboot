@@ -1,14 +1,30 @@
-packer {}
+packer {
+  required_plugins {
+    happycloud = {
+      version = ">= 1.1.3"
+      source = "github.com/michalfita/cross"
+    }
+  }
+}
 
 build {
-  sources = ["source.arm.raspi-netboot"]
-  
+  sources = ["source.cross.raspi-netboot"]
+
+  provisioner "shell" {
+    inline = [
+      "echo 'Setting locale...'",
+      "echo 'en_US.UTF-8 UTF-8' >> /etc/locale.gen",
+      "dpkg-reconfigure -f noninteractive locales",
+    ]
+  }
+
   provisioner "shell" {
     environment_vars = [
       "DEBIAN_FRONTEND=noninteractive",
       "DEBCONF_NONINTERACTIVE_SEEN=true"
     ]
     inline = [
+      "echo 'Setting time zone...'",
       "echo 'tzdata tzdata/Areas select US' | debconf-set-selections",
       "echo 'tzdata tzdata/Zones/US select Eastern' | debconf-set-selections",
       "rm /etc/timezone",
@@ -19,16 +35,16 @@ build {
   
   provisioner "shell" {
     inline = [
+      "echo 'Installing packages...'",
       "apt update",
-      "apt full-upgrade -y"
+      "apt install -y initramfs-tools open-iscsi vim locales",
+      "apt full-upgrade -y",
     ]
   }
 
   provisioner "shell" {
     inline = [
-      "echo 'Setting up hostname...'",
-      "echo ${var.hostname} > /etc/hostname",
-      "sed -i -r -e 's/(.*)raspberrypi(.*?)$/\\1${var.hostname}\\2/g' /etc/hosts"
+      "mkdir -p /etc/network/interfaces.d",
     ]
   }
 
@@ -69,10 +85,22 @@ build {
     ]
   }
 
+  provisioner "file" {
+    content = templatefile(
+      "templates/00-eth0-prefix.pkrtpl.hcl",
+      {
+        ipv6_suffix = var.ipv6_suffix
+      },
+    )
+
+    destination = "/etc/network/interfaces.d/00-eth0-prefix"
+  }
+
   provisioner "shell" {
     inline = [
-      "echo 'Installing additional packages...'",
-      "apt install -y initramfs-tools open-iscsi vim"
+      "echo 'Setting up hostname...'",
+      "echo ${var.hostname} > /etc/hostname",
+      "sed -i -r -e 's/(.*)raspberrypi(.*?)$/\\1${var.hostname}\\2/g' /etc/hosts"
     ]
   }
 
@@ -84,6 +112,13 @@ build {
       "echo ISCSI_TARGET_IP=${var.iscsi_target_ip} >> /etc/iscsi/iscsi.initramfs",
       "echo 'Setting up /etc/iscsi/initiatorname.iscsi...'",
       "echo InitiatorName=${var.iscsi_initiator_iqn} > /etc/iscsi/initiatorname.iscsi"
+    ]
+  }
+
+  provisioner "shell" {
+    inline = [
+      "echo 'Rebuilding initramfs'",
+      "update-initramfs -u -v"
     ]
   }
 }

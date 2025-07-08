@@ -30,3 +30,6 @@ variable "image_dir" {
   type = string
 }
 
+variable ipv6_suffix {
+  type = string
+}
