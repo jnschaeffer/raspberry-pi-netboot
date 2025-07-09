@@ -5,7 +5,7 @@ source "cross" "raspi-netboot" {
   file_target_extension = "xz"
   file_unarchive_cmd    = ["xz", "--decompress", "$ARCHIVE_PATH"]
   image_build_method    = "resize"
-  image_path            = "${var.image_dir}/${var.hostname}.img"
+  image_path            = "${var.image_dir}/raspios.img"
   image_size            = "6G"
   image_type            = "gpt"
   image_partitions {

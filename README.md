@@ -1,6 +1,6 @@
 # raspberry-pi-netboot - Boot your Pi off iSCSI
 
-raspberry-pi-netboot is a [Packer][packer] template for building diskless Raspberry Pi images. It's meant to be run on an ARM machine, because this is a personal project and I happen to have one. This repository also has no license because I used a lot of blog posts to put it together, so do what you want with it.
+raspberry-pi-netboot contains a [Packer][packer] template for building diskless Raspberry Pi images and build scripts for provisioning them. It's meant to be run on an ARM machine, because this is a personal project and I happen to have one. This repository also has no license because I used a lot of blog posts to put it together, so do what you want with it.
 
 Special thanks to the following blog posts for inspiration:
 
@@ -13,11 +13,19 @@ Special thanks to the following blog posts for inspiration:
 
 ## Getting started
 
-To build an image, place a `.pkrvars.hcl` file for an image in `configs/` and run `make images`. Images will be written to `images/<hostname>.img`, where `<hostname>` is the value of the `hostname` Packer template variable.
+To start, define your build environment in `config.env`; `config.env.example` provides an example set of values. Then, define your node configurations in `configs` using `configs/node.env.example` as an example.
 
-If you don't have an ARM machine to build on and want to make use of `binfmt_misc` functionality in the Packer builder, edit the Makefile to remove the `DONT_SETUP_QEMU` environment variable declaration.
+To build a golden image for the nodes, run `make image`. If you don't have an ARM machine to build on and want to make use of `binfmt_misc` functionality in the Packer builder, edit the Makefile to remove the `DONT_SETUP_QEMU` environment variable declaration.
 
-Use the scripts in `scripts/` to configure the machine.
+To provision the nodes, run `make provision`. This will perform the following actions for each node:
+
+* Write bootloader files to the node's `/boot/firmware` mount point
+* Create a filesystem at the node's iSCSI target and write root filesystem files to the node's `/` mount point
+* Configure `/etc/fstab` and the kernel command line to boot via iSCSI
+* Configure NTP to use the provided NTP server(s)
+* Configure SSH to disallow passwordless auth and allow root login with the provided public key
+* Configure networking to advertise an IPv6 address with the provided suffix
+* Install a custom kernel (optional)
 
 ## Notes
 

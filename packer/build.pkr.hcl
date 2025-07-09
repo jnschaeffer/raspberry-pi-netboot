@@ -50,23 +50,14 @@ build {
 
   provisioner "shell" {
     inline = [
-      "echo 'Setting up NTP...'",
-      "sed -i -r -e 's/#?NTP.*?$/NTP=${var.ntpd_servers}/g' /etc/systemd/timesyncd.conf"
-    ]
-  }
-
-  provisioner "shell" {
-    inline = [
       "echo 'Setting up sshd...'",
       "touch /boot/ssh",
       "touch /boot/firmware/ssh",
-      "echo ${var.user_password} > /boot/userconf.txt",
-      "echo ${var.user_password} > /boot/firmware/userconf.txt",
       "sed -i -r -e 's/#?.*?PermitRootLogin.*?$/PermitRootLogin without-password/g' /etc/ssh/sshd_config",
       "sed -i -r -e 's/#?.*?PasswordAuthentication.*?$/PasswordAuthentication no/g' /etc/ssh/sshd_config",
       "mkdir -p /root/.ssh/",
       "chmod 700 /root/.ssh",
-      "echo ${var.root_pub_key} >> /root/.ssh/authorized_keys",
+      "touch /root/.ssh/authorized_keys",
       "chmod 644 /root/.ssh/authorized_keys"
     ]
   }
@@ -82,43 +73,6 @@ build {
     inline = [
       "echo 'Disabling bluetooth...'",
       "echo 'dtoverlay=disable-bt' >> /boot/firmware/config.txt"
-    ]
-  }
-
-  provisioner "file" {
-    content = templatefile(
-      "templates/00-eth0-prefix.pkrtpl.hcl",
-      {
-        ipv6_suffix = var.ipv6_suffix
-      },
-    )
-
-    destination = "/etc/network/interfaces.d/00-eth0-prefix"
-  }
-
-  provisioner "shell" {
-    inline = [
-      "echo 'Setting up hostname...'",
-      "echo ${var.hostname} > /etc/hostname",
-      "sed -i -r -e 's/(.*)raspberrypi(.*?)$/\\1${var.hostname}\\2/g' /etc/hosts"
-    ]
-  }
-
-  provisioner "shell" {
-    inline = [
-      "echo 'Setting up /etc/iscsi/iscsi.initramfs...'",
-      "echo ISCSI_INITIATOR=${var.iscsi_initiator_iqn} > /etc/iscsi/iscsi.initramfs",
-      "echo ISCSI_TARGET=${var.iscsi_target_iqn} >> /etc/iscsi/iscsi.initramfs",
-      "echo ISCSI_TARGET_IP=${var.iscsi_target_ip} >> /etc/iscsi/iscsi.initramfs",
-      "echo 'Setting up /etc/iscsi/initiatorname.iscsi...'",
-      "echo InitiatorName=${var.iscsi_initiator_iqn} > /etc/iscsi/initiatorname.iscsi"
-    ]
-  }
-
-  provisioner "shell" {
-    inline = [
-      "echo 'Rebuilding initramfs'",
-      "update-initramfs -u -v"
     ]
   }
 }
