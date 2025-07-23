@@ -1,12 +1,12 @@
-use std::fs::{create_dir_all, remove_dir, File};
+use std::fs;
 use std::io::prelude::*;
 use std::path;
-use std::process::Output;
-use tokio::process::Command;
-use tokio::time::{sleep, Duration};
+use std::process;
+use tokio::process as t_process;
+use tokio::time;
 
 use async_trait::async_trait;
-use sys_mount::{unmount, Mount, MountFlags, UnmountFlags};
+use sys_mount;
 use tokio;
 
 use crate::config;
@@ -17,16 +17,20 @@ const INSTANCE_MOUNT_DIR: &str = "instance";
 const ROOTFS_MOUNT_DIR: &str = "rootfs";
 const BOOT_MOUNT_DIR: &str = "boot";
 
+/// Represents a single step in provisioning an instance.
 #[async_trait]
 pub trait Step {
+    /// Returns the name of the step.
     fn name(&self) -> String;
 
+    /// Runs the step's provisioning logic.
     async fn run(
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
     ) -> Result<(), Box<dyn std::error::Error>>;
 
+    /// Cleans up the step's provisioning logic.
     async fn cleanup(
         &self,
         workspace_spec: &config::WorkspaceConfig,
@@ -34,7 +38,7 @@ pub trait Step {
     ) -> ();
 }
 
-fn output_or_err(output: Output) -> Result<String, Box<dyn std::error::Error>> {
+fn output_or_err(output: process::Output) -> Result<String, Box<dyn std::error::Error>> {
     if !output.status.success() {
         let stdout = String::from_utf8(output.stdout)?;
         let stderr = String::from_utf8(output.stderr)?;
@@ -59,13 +63,14 @@ fn write_to_path(path: &[&str], contents: String) -> Result<(), Box<dyn std::err
 
     let path_str = pathbuf.to_str().ok_or("invalid path")?;
 
-    let mut file = File::create(path_str)?;
+    let mut file = fs::File::create(path_str)?;
 
     file.write_all(contents.as_bytes())?;
 
     Ok(())
 }
 
+/// Creates requisite directories for instance provisioning.
 pub struct MkdirStep {}
 
 #[async_trait]
@@ -127,7 +132,7 @@ impl Step for MkdirStep {
         ];
 
         for pb in all_pbs {
-            create_dir_all(pb.as_path())?;
+            fs::create_dir_all(pb.as_path())?;
         }
 
         Ok(())
@@ -215,7 +220,7 @@ impl Step for MkdirStep {
 
         for pb in all_pbs {
             let path = pb.as_path();
-            match remove_dir(path) {
+            match fs::remove_dir(path) {
                 Ok(_) => {}
                 Err(e) => {
                     let path_str = path.to_str().unwrap_or("<invalid path>");
@@ -226,6 +231,7 @@ impl Step for MkdirStep {
     }
 }
 
+/// Logs into the workspace iSCSI portal and instance iSCSI target.
 pub struct LoginIscsiStep {}
 
 #[async_trait]
@@ -244,7 +250,7 @@ impl Step for LoginIscsiStep {
             workspace_spec.iscsi_target_ip, instance_spec.iscsi_target_iqn
         );
 
-        let discover_output = Command::new("iscsiadm")
+        let discover_output = t_process::Command::new("iscsiadm")
             .args([
                 "--mode",
                 "discovery",
@@ -258,7 +264,7 @@ impl Step for LoginIscsiStep {
 
         output_or_err(discover_output)?;
 
-        let login_output = Command::new("iscsiadm")
+        let login_output = t_process::Command::new("iscsiadm")
             .args([
                 "--mode",
                 "node",
@@ -275,7 +281,7 @@ impl Step for LoginIscsiStep {
 
         println!("sleeping for 5 seconds because iscsiadm is racy");
 
-        sleep(Duration::from_millis(5_000)).await;
+        time::sleep(time::Duration::from_millis(5_000)).await;
 
         Ok(())
     }
@@ -290,7 +296,7 @@ impl Step for LoginIscsiStep {
             workspace_spec.iscsi_target_ip, instance_spec.iscsi_target_iqn
         );
 
-        let output_result = Command::new("iscsiadm")
+        let output_result = t_process::Command::new("iscsiadm")
             .args([
                 "--mode",
                 "node",
@@ -320,6 +326,7 @@ impl Step for LoginIscsiStep {
     }
 }
 
+/// Formats the iSCSI target device and creates an ext4 filesystem on the device.
 pub struct PrepareRootfsStep {}
 
 #[async_trait]
@@ -342,7 +349,7 @@ impl Step for PrepareRootfsStep {
 
         println!("making GPT partition table on {}", iscsi_dev_path);
 
-        let mklabel_output = Command::new("parted")
+        let mklabel_output = t_process::Command::new("parted")
             .args(["--script", &iscsi_dev_path, "mklabel", "gpt"])
             .output()
             .await?;
@@ -351,7 +358,7 @@ impl Step for PrepareRootfsStep {
 
         println!("making partition on {}", iscsi_dev_path);
 
-        let mkpart_output = Command::new("parted")
+        let mkpart_output = t_process::Command::new("parted")
             .args([
                 "--script",
                 "--align",
@@ -384,11 +391,11 @@ impl Step for PrepareRootfsStep {
 
         println!("formatting disk at {}", iscsi_part_path);
 
-        println!("sleeping again...?");
+        println!("sleeping for 5 seconds because iscsiadm is racy");
 
-        sleep(Duration::from_millis(3_000)).await;
+        time::sleep(time::Duration::from_millis(5_000)).await;
 
-        let mkfs_output = Command::new("mkfs")
+        let mkfs_output = t_process::Command::new("mkfs")
             .args(["-t", "ext4", &iscsi_part_path])
             .output()
             .await?;
@@ -397,7 +404,7 @@ impl Step for PrepareRootfsStep {
 
         println!("finding device for {}", iscsi_part_path);
 
-        let lsblk_output = Command::new("lsblk")
+        let lsblk_output = t_process::Command::new("lsblk")
             .args(["-n", "-o", "NAME", &iscsi_part_path])
             .output()
             .await?;
@@ -410,17 +417,9 @@ impl Step for PrepareRootfsStep {
 
         println!("mounting {} at {}", &dev_part_path, mount_path);
 
-        println!("sleeping for 5 seconds before iSCSI mount");
-
-        sleep(Duration::from_millis(5_000)).await;
-
         // The mount here should persist indefinitely instead of being auto-unmounted
         // on drop
-        Mount::builder().mount(&dev_part_path, mount_path)?;
-
-        println!("sleeping for 10 seconds after iSCSI mount");
-
-        sleep(Duration::from_millis(10_000)).await;
+        sys_mount::Mount::builder().mount(&dev_part_path, mount_path)?;
 
         Ok(())
     }
@@ -452,7 +451,7 @@ impl Step for PrepareRootfsStep {
             }
         };
 
-        match unmount(mount_path, UnmountFlags::DETACH) {
+        match sys_mount::unmount(mount_path, sys_mount::UnmountFlags::DETACH) {
             Ok(_) => {}
             Err(e) => {
                 println!("error unmounting {}: {}", mount_path, e);
@@ -461,6 +460,7 @@ impl Step for PrepareRootfsStep {
     }
 }
 
+/// Mounts the Raspberry Pi `/boot/firmware` directory at the workspace NFS server.
 pub struct MountBootStep {}
 
 #[async_trait]
@@ -503,7 +503,7 @@ impl Step for MountBootStep {
 
         // The mount here should persist indefinitely instead of being auto-unmounted
         // on drop
-        Mount::builder()
+        sys_mount::Mount::builder()
             .fstype("nfs")
             .data(&nfs_mount_addr_option)
             .mount(&nfs_mount_src, mount_path)?;
@@ -538,7 +538,7 @@ impl Step for MountBootStep {
             }
         };
 
-        match unmount(mount_path, UnmountFlags::DETACH) {
+        match sys_mount::unmount(mount_path, sys_mount::UnmountFlags::DETACH) {
             Ok(_) => {}
             Err(e) => {
                 println!("error unmounting {}: {}", mount_path, e);
@@ -547,6 +547,7 @@ impl Step for MountBootStep {
     }
 }
 
+/// Updates the kernel command line to boot via iSCSI.
 pub struct UpdateCmdlineStep {}
 
 #[async_trait]
@@ -589,7 +590,7 @@ impl Step for UpdateCmdlineStep {
 
         let cmdline_path = cmdline_pb.to_str().ok_or("invalid cmdline.txt path")?;
 
-        let findmnt_output = Command::new("findmnt")
+        let findmnt_output = t_process::Command::new("findmnt")
             .args(["-n", "-o", "SOURCE", rootfs_path])
             .output()
             .await?;
@@ -599,7 +600,7 @@ impl Step for UpdateCmdlineStep {
 
         println!("getting PARTUUID for {}", mount_source);
 
-        let lsblk_output = Command::new("lsblk")
+        let lsblk_output = t_process::Command::new("lsblk")
             .args(["-n", "-o", "PARTUUID", mount_source])
             .output()
             .await?;
@@ -620,7 +621,7 @@ impl Step for UpdateCmdlineStep {
         println!("updating {} with {}", fstab_path, fstab_sed_expr);
 
         output_or_err(
-            Command::new("sed")
+            t_process::Command::new("sed")
                 .args(["-i", "-r", "-e", &fstab_sed_expr, &fstab_path])
                 .output()
                 .await?,
@@ -637,7 +638,7 @@ impl Step for UpdateCmdlineStep {
         println!("updating {} with {}", cmdline_path, cmdline_sed_expr);
 
         output_or_err(
-            Command::new("sed")
+            t_process::Command::new("sed")
                 .args(["-i", "-r", "-e", &cmdline_sed_expr, &cmdline_path])
                 .output()
                 .await?,
@@ -655,6 +656,7 @@ impl Step for UpdateCmdlineStep {
     }
 }
 
+/// Copies Raspberry Pi OS image data to the boot and rootfs mounts.
 pub struct CopyDataStep {}
 
 impl CopyDataStep {
@@ -673,18 +675,18 @@ impl CopyDataStep {
 
         // We don't actually use this value but we hold onto it
         // so we unmount on drop
-        let _mount_result = Mount::builder()
+        let _mount_result = sys_mount::Mount::builder()
             .explicit_loopback()
             .loopback_offset(offset)
-            .flags(MountFlags::RDONLY)
-            .mount_autodrop(img_path, mnt_path, UnmountFlags::DETACH)?;
+            .flags(sys_mount::MountFlags::RDONLY)
+            .mount_autodrop(img_path, mnt_path, sys_mount::UnmountFlags::DETACH)?;
 
         println!(
             "copying contents of {} to {}",
             mnt_path_str, target_path_str
         );
 
-        let cp_output = Command::new("cp")
+        let cp_output = t_process::Command::new("cp")
             .args(["-r", &mnt_path_str, &target_path_str])
             .output()
             .await?;
@@ -787,6 +789,7 @@ impl Step for CopyDataStep {
     }
 }
 
+/// Configures a username and password for the instance.
 pub struct ConfigureUserAuthStep {}
 
 #[async_trait]
@@ -836,6 +839,7 @@ impl Step for ConfigureUserAuthStep {
     }
 }
 
+/// Configures the hostname for the instance.
 pub struct ConfigureHostnameStep {}
 
 impl ConfigureHostnameStep {
@@ -880,7 +884,7 @@ impl ConfigureHostnameStep {
 
         let hosts_sed_expr = format!("s/(.*)raspberrypi(.*?)$/\\1{}\\2/g", instance_spec.id);
 
-        let sed_output = Command::new("sed")
+        let sed_output = t_process::Command::new("sed")
             .args(["-i", "-r", "-e", &hosts_sed_expr, &hosts_path])
             .output()
             .await?;
@@ -918,6 +922,7 @@ impl Step for ConfigureHostnameStep {
     }
 }
 
+/// Does nothing on its own; this signals the completion of provisioning.
 pub struct FinishStep {}
 
 #[async_trait]
@@ -945,6 +950,7 @@ impl Step for FinishStep {
     }
 }
 
+/// Echoes a message.
 pub struct EchoStep {
     pub msg: &'static str,
 }

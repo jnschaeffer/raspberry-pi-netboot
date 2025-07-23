@@ -2,8 +2,9 @@ pub mod config;
 pub mod graph;
 mod steps;
 
-use futures::future::join_all;
+use futures::future;
 
+/// Provisions instances as defined by all configs associated with the given workspace.
 pub async fn run(
     workspace_spec: &config::WorkspaceConfig,
     instance_specs: &Vec<config::InstanceConfig>,
@@ -50,7 +51,7 @@ pub async fn run(
         .iter()
         .map(|spec| graph.run(workspace_spec, spec, finish_step));
 
-    let joined = join_all(results);
+    let joined = future::join_all(results);
 
     joined.await
 }

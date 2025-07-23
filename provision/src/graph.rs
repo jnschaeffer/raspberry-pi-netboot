@@ -1,14 +1,15 @@
-use std::collections::{HashMap, HashSet};
+use std::collections;
 use std::fmt;
 
-use futures::future::join_all;
-use thiserror::Error;
-use tokio::sync::broadcast::{channel, Receiver, Sender};
+use futures::future;
+use thiserror;
+use tokio::sync::broadcast;
 
 use crate::config;
 use crate::steps;
 
-#[derive(Clone, Error, Debug)]
+/// StepError represents an error executing a step in a graph.
+#[derive(Clone, thiserror::Error, Debug)]
 pub struct StepError {
     step_name: String,
     msg: String,
@@ -26,6 +27,7 @@ struct VisitResult {
     result: Result<(), StepError>,
 }
 
+/// A graph of instance provisioning steps.
 pub struct StepGraph {
     nodes: Vec<Box<dyn steps::Step>>,
     edges_fwd: Vec<Vec<usize>>,
@@ -33,6 +35,7 @@ pub struct StepGraph {
 }
 
 impl StepGraph {
+    /// Creates a new StepGraph.
     pub fn new() -> StepGraph {
         let nodes = Vec::new();
         let edges_fwd = Vec::new();
@@ -45,6 +48,7 @@ impl StepGraph {
         }
     }
 
+    /// Adds a new step as a node in the graph. Returns the ID of the node.
     pub fn add_node(&mut self, step: impl steps::Step + 'static) -> usize {
         let len = self.nodes.len();
         let b: Box<dyn steps::Step> = Box::new(step);
@@ -56,6 +60,8 @@ impl StepGraph {
         len
     }
 
+    /// Adds an edge from one node to another node. Panics if either node does not exist
+    /// in the graph.
     pub fn add_edge(&mut self, from: usize, to: usize) {
         let edges_fwd = self.edges_fwd.get_mut(from).expect("edges not found");
         let edges_rev = self.edges_rev.get_mut(to).expect("edges not found");
@@ -66,7 +72,7 @@ impl StepGraph {
         edges_rev.push(from);
     }
 
-    pub fn build_node_set(&self, node: usize, set: &mut HashSet<usize>) {
+    fn build_node_set(&self, node: usize, set: &mut collections::HashSet<usize>) {
         set.insert(node);
 
         let edges_fwd = self.edges_fwd.get(node).expect("invalid index");
@@ -79,8 +85,8 @@ impl StepGraph {
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
         node_idx: usize,
-        mut dependencies: Vec<Receiver<VisitResult>>,
-        out: Sender<VisitResult>,
+        mut dependencies: Vec<broadcast::Receiver<VisitResult>>,
+        out: broadcast::Sender<VisitResult>,
         visit_fn: impl AsyncFn(
             &Box<dyn steps::Step>,
             &config::WorkspaceConfig,
@@ -95,7 +101,8 @@ impl StepGraph {
 
         println!("{}: waiting for dependencies", step_name);
 
-        let dependencies_results = join_all(dependencies.iter_mut().map(async |d| d.recv().await));
+        let dependencies_results =
+            future::join_all(dependencies.iter_mut().map(async |d| d.recv().await));
 
         for res in dependencies_results.await {
             println!("{}: received result", step_name);
@@ -131,22 +138,22 @@ impl StepGraph {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-        node_set: &HashSet<usize>,
+        node_set: &collections::HashSet<usize>,
         neighbor_fn: impl Fn(usize) -> Vec<usize>,
         visit_fn: impl AsyncFn(
             &Box<dyn steps::Step>,
             &config::WorkspaceConfig,
             &config::InstanceConfig,
         ) -> Result<(), Box<dyn std::error::Error>>,
-    ) -> HashMap<usize, VisitResult> {
-        let mut result_senders: HashMap<usize, Sender<VisitResult>> =
-            HashMap::with_capacity(node_set.len());
+    ) -> collections::HashMap<usize, VisitResult> {
+        let mut result_senders: collections::HashMap<usize, broadcast::Sender<VisitResult>> =
+            collections::HashMap::with_capacity(node_set.len());
 
-        let mut result_receivers: HashMap<usize, Receiver<VisitResult>> =
-            HashMap::with_capacity(node_set.len());
+        let mut result_receivers: collections::HashMap<usize, broadcast::Receiver<VisitResult>> =
+            collections::HashMap::with_capacity(node_set.len());
 
         for node in node_set {
-            let (r_tx, r_rx) = channel(1);
+            let (r_tx, r_rx) = broadcast::channel(1);
 
             result_senders.insert(*node, r_tx);
             result_receivers.insert(*node, r_rx);
@@ -160,7 +167,7 @@ impl StepGraph {
                 .expect("sender not found")
                 .to_owned();
 
-            let dependencies_recv: Vec<Receiver<VisitResult>> = deps
+            let dependencies_recv: Vec<broadcast::Receiver<VisitResult>> = deps
                 .iter()
                 .map(|n| result_senders.get(n).expect("sender not found").subscribe())
                 .collect();
@@ -175,9 +182,9 @@ impl StepGraph {
             )
         });
 
-        let joined = join_all(futures);
+        let joined = future::join_all(futures);
 
-        let mut results = HashMap::with_capacity(node_set.len());
+        let mut results = collections::HashMap::with_capacity(node_set.len());
 
         joined.await;
 
@@ -195,13 +202,14 @@ impl StepGraph {
         results
     }
 
+    /// Executes a walk through the graph over all points that can reach `until`.
     pub async fn run(
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
         until: usize,
     ) -> Result<(), StepError> {
-        let mut node_set = &mut HashSet::new();
+        let mut node_set = &mut collections::HashSet::new();
 
         self.build_node_set(until, &mut node_set);
 
@@ -236,7 +244,7 @@ impl StepGraph {
             .result
             .clone();
 
-        let visited_node_set = &mut HashSet::new();
+        let visited_node_set = &mut collections::HashSet::new();
 
         for v in run_results.values() {
             visited_node_set.insert(v.node_idx);
