@@ -105,7 +105,7 @@ impl StepGraph {
             future::join_all(dependencies.iter_mut().map(async |d| d.recv().await));
 
         for res in dependencies_results.await {
-            println!("{}: received result", step_name);
+            println!("{}: dependency finished", step_name);
 
             let v = res.unwrap();
 
@@ -243,6 +243,8 @@ impl StepGraph {
             .expect("result not found")
             .result
             .clone();
+
+        println!("provisioning finished, beginning cleanup");
 
         let visited_node_set = &mut collections::HashSet::new();
 

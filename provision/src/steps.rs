@@ -1,3 +1,4 @@
+use std::error;
 use std::fs;
 use std::io::prelude::*;
 use std::path;
@@ -28,7 +29,7 @@ pub trait Step {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> Result<(), Box<dyn error::Error>>;
 
     /// Cleans up the step's provisioning logic.
     async fn cleanup(
@@ -38,7 +39,7 @@ pub trait Step {
     ) -> ();
 }
 
-fn output_or_err(output: process::Output) -> Result<String, Box<dyn std::error::Error>> {
+fn output_or_err(output: process::Output) -> Result<String, Box<dyn error::Error>> {
     if !output.status.success() {
         let stdout = String::from_utf8(output.stdout)?;
         let stderr = String::from_utf8(output.stderr)?;
@@ -58,7 +59,7 @@ stdout: '{}'",
     }
 }
 
-fn write_to_path(path: &[&str], contents: String) -> Result<(), Box<dyn std::error::Error>> {
+fn write_to_path(path: &[&str], contents: String) -> Result<(), Box<dyn error::Error>> {
     let pathbuf: path::PathBuf = path.iter().collect();
 
     let path_str = pathbuf.to_str().ok_or("invalid path")?;
@@ -83,7 +84,7 @@ impl Step for MkdirStep {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         let img_rootfs_mount_pb: path::PathBuf = [
             &workspace_spec.path,
             &instance_spec.id,
@@ -244,7 +245,7 @@ impl Step for LoginIscsiStep {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         println!(
             "logging into {} to access target {}",
             workspace_spec.iscsi_target_ip, instance_spec.iscsi_target_iqn
@@ -339,7 +340,7 @@ impl Step for PrepareRootfsStep {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         let iscsi_dev_path = format!(
             "/dev/disk/by-path/ip-{}:3260-iscsi-{}-lun-1",
             workspace_spec.iscsi_target_ip, instance_spec.iscsi_target_iqn,
@@ -389,9 +390,9 @@ impl Step for PrepareRootfsStep {
             .to_str()
             .ok_or(String::from("invalid mount path"))?;
 
-        println!("formatting disk at {}", iscsi_part_path);
-
         println!("sleeping for 5 seconds because iscsiadm is racy");
+
+        println!("formatting disk at {}", iscsi_part_path);
 
         time::sleep(time::Duration::from_millis(5_000)).await;
 
@@ -463,6 +464,24 @@ impl Step for PrepareRootfsStep {
 /// Mounts the Raspberry Pi `/boot/firmware` directory at the workspace NFS server.
 pub struct MountBootStep {}
 
+impl MountBootStep {
+    fn remove_dir_contents(&self, path: &path::Path) -> Result<(), Box<dyn error::Error>> {
+        for entry_result in fs::read_dir(path)? {
+            let entry = entry_result?;
+            let entry_type = entry.file_type()?;
+            let entry_path = entry.path();
+
+            if entry_type.is_dir() {
+                fs::remove_dir_all(entry_path)?;
+            } else {
+                fs::remove_file(entry_path)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl Step for MountBootStep {
     fn name(&self) -> String {
@@ -473,7 +492,7 @@ impl Step for MountBootStep {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         let nfs_path_pb: path::PathBuf = [&workspace_spec.nfs_tftp_dir, &instance_spec.mac_addr]
             .iter()
             .collect();
@@ -507,6 +526,11 @@ impl Step for MountBootStep {
             .fstype("nfs")
             .data(&nfs_mount_addr_option)
             .mount(&nfs_mount_src, mount_path)?;
+
+        println!("removing the contents of {}", mount_path);
+
+        // Remove the contents of the mount directory before proceeding
+        self.remove_dir_contents(&mount_path_pb)?;
 
         Ok(())
     }
@@ -560,7 +584,7 @@ impl Step for UpdateCmdlineStep {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         let rootfs_pb: path::PathBuf = [
             &workspace_spec.path,
             &instance_spec.id,
@@ -666,7 +690,7 @@ impl CopyDataStep {
         offset: u64,
         mnt_path: &path::Path,
         target_path: &path::Path,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         let mnt_path_str = mnt_path.to_str().ok_or("invalid mount path")?;
 
         let target_path_str = target_path.to_str().ok_or("invalid target path")?;
@@ -700,7 +724,7 @@ impl CopyDataStep {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         let img_boot_mount_pb: path::PathBuf = [
             &workspace_spec.path,
             &instance_spec.id,
@@ -733,7 +757,7 @@ impl CopyDataStep {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         let img_rootfs_mount_pb: path::PathBuf = [
             &workspace_spec.path,
             &instance_spec.id,
@@ -773,7 +797,7 @@ impl Step for CopyDataStep {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         self.copy_boot(workspace_spec, instance_spec).await?;
         self.copy_rootfs(workspace_spec, instance_spec).await?;
 
@@ -802,7 +826,7 @@ impl Step for ConfigureUserAuthStep {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         let userconf_path = [
             &workspace_spec.path,
             &instance_spec.id,
@@ -847,7 +871,7 @@ impl ConfigureHostnameStep {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         let hostname_path = [
             &workspace_spec.path,
             &instance_spec.id,
@@ -868,7 +892,7 @@ impl ConfigureHostnameStep {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         let hosts_pb: path::PathBuf = [
             &workspace_spec.path,
             &instance_spec.id,
@@ -906,7 +930,7 @@ impl Step for ConfigureHostnameStep {
         &self,
         workspace_spec: &config::WorkspaceConfig,
         instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         self.configure_etc_hostname(workspace_spec, instance_spec)?;
 
         self.configure_etc_hosts(workspace_spec, instance_spec)
@@ -935,7 +959,7 @@ impl Step for FinishStep {
         &self,
         _workspace_spec: &config::WorkspaceConfig,
         _instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         println!("done!");
 
         Ok(())
@@ -965,7 +989,7 @@ impl Step for EchoStep {
         &self,
         _workspace_spec: &config::WorkspaceConfig,
         _instance_spec: &config::InstanceConfig,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn error::Error>> {
         println!("{}: running {}", self.name(), self.msg);
 
         match self.msg {
