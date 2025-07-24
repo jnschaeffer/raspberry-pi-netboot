@@ -2,8 +2,6 @@ pub mod config;
 pub mod graph;
 mod steps;
 
-use futures::future;
-
 /// Provisions instances as defined by all configs associated with the given workspace.
 pub async fn run(
     workspace_spec: &config::WorkspaceConfig,
@@ -47,11 +45,15 @@ pub async fn run(
     graph.add_edge(prepare_rootfs_step, login_iscsi_step);
     graph.add_edge(prepare_rootfs_step, mkdir_step);
 
-    let results = instance_specs
-        .iter()
-        .map(|spec| graph.run(workspace_spec, spec, finish_step));
+    // While in theory we can run all provisions concurrently, in practice this swamps the NAS and
+    // causes odd behavior like iSCSI timeouts. Thus, we provision each machine serially instead.
+    let mut results = Vec::with_capacity(instance_specs.len());
 
-    let joined = future::join_all(results);
+    for spec in instance_specs {
+        let result = graph.run(workspace_spec, spec, finish_step).await;
 
-    joined.await
+        results.push(result);
+    }
+
+    results
 }
