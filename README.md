@@ -13,28 +13,30 @@ Special thanks to the following blog posts for inspiration:
 
 ## Getting started
 
-To start, define your build environment in `config.env`; `config.env.example` provides an example set of values. Then, define your node configurations in `configs` using `configs/node.env.example` as an example.
+To start, build a golden image for the nodes by running `make image`. This will write a Raspberry Pi OS image to `images/raspios.img`. If you don't have an ARM machine to build on and want to make use of `binfmt_misc` functionality in the Packer builder, edit the Makefile to remove the `DONT_SETUP_QEMU` environment variable declaration.
 
-To build a golden image for the nodes, run `make image`. If you don't have an ARM machine to build on and want to make use of `binfmt_misc` functionality in the Packer builder, edit the Makefile to remove the `DONT_SETUP_QEMU` environment variable declaration.
+Once you have an image, define your build configuration in a JSON file in `configs/workspace.json`. This file defines fleet-level settings like OS image and network storage locations. Then, define, your instance configurations as JSON files in the `configs/instances` directory. These files define instance-level settings like instance ID, iSCSI IQNs, MAC address, and authentication information. For more information about these values, see `provision/src/config.rs`.
 
 To provision the nodes, run `make provision`. This will perform the following actions for each node:
 
 * Write bootloader files to the node's `/boot/firmware` mount point
 * Create a filesystem at the node's iSCSI target and write root filesystem files to the node's `/` mount point
 * Configure `/etc/fstab` and the kernel command line to boot via iSCSI
-* Configure NTP to use the provided NTP server(s)
 * Configure SSH to disallow passwordless auth and allow root login with the provided public key
-* Configure networking to advertise an IPv6 address with the provided suffix
-* Install a custom kernel (optional)
+
+The exact build steps are located in `provision/src/steps.rs`. The graph defining build steps is located in `provision/src/lib.rs`.
 
 ## Notes
 
-This template and the associated scripts make some specific assumptions about the deployment environment. In particular, it assumes:
+This provisioning flow makes some assumptions about the deployment environment. In particular, it assumes:
 
 * Each machine is a Raspberry Pi 4
-* Individual machines get network information from a DHCP server instead of using static IPs
+* Each machine is configured as a [network boot client][net-boot]
+* A DHCP server manages host configuration
+* The DHCP server advertises the location of an NTP server using [DHCP option 42][rfc-2132-42]
+* The DHCP server advertises the location of the TFTP server using [DHCP option 66][rfc-2132-66]
 * The TFTP server is running on the same subnet as the Raspberry Pi
-* The DHCP server advertises the location of the TFTP server using [DHCP option 66][rfc-2132]
 
-[net-boot]: https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#network-booting
-[rfc-2132]: https://www.rfc-editor.org/rfc/rfc2132#section-9.4
+[net-boot]: https://www.raspberrypi.com/documentation/computers/remote-access.html#configure-a-network-boot-client
+[rfc-2132-42]: https://www.rfc-editor.org/rfc/rfc2132#section-8.3
+[rfc-2132-66]: https://www.rfc-editor.org/rfc/rfc2132#section-9.4
